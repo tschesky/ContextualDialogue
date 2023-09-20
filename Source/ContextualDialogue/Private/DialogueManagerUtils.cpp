@@ -26,7 +26,11 @@ FString FDialogueCondition::ToString() const
 	return FString::Printf(TEXT("{ Var: %s, Type: %hs, CompareTo: %s }"), *VariableToCheck, EConditionType_str[ConditionType], *ValueToCompare);
 }
 
-bool FDialogueLine::GetParameterValue(FString ParameterName, FString& ParameterValue)
+UContextualDialogueLine::UContextualDialogueLine()
+{
+}
+
+bool UContextualDialogueLine::GetParameterValue(FString ParameterName, FString& ParameterValue)
 {
 	FString* Val = Parameters.Find(ParameterName);
 
@@ -45,7 +49,12 @@ bool FDialogueLine::GetParameterValue(FString ParameterName, FString& ParameterV
 	return false;
 }
 
-FString FDialogueLine::ToString()
+FString UContextualDialogueLine::ToPrettyString()
+{
+	return "Dialogue line pretty string";
+}
+
+FString UContextualDialogueLine::ToJSONString()
 {
 	FString OutConditions = "[", OutCallbacks = "[", OutParameters = "[";
 
@@ -67,16 +76,14 @@ FString FDialogueLine::ToString()
 	}
 	OutParameters.Append("]");
 
-	return FString::Printf(TEXT("{Name: %s, Line: %s, Conditions: %s, Callbacks: %s, Parameters: %s }"),
-		*UniqueName, *LineToSay, *OutConditions, *OutCallbacks, *OutParameters);
+	return FString::Printf(TEXT("{Name: %s, Conditions: %s, Callbacks: %s, Parameters: %s }"),
+		*UniqueName, *OutConditions, *OutCallbacks, *OutParameters);
 }
 
-TSharedPtr<FJsonObject> FDialogueLine::ToJsonObject()
+TSharedPtr<FJsonObject> UContextualDialogueLine::ToJsonObject()
 {
 	TSharedPtr<FJsonObject> LineJSON(new FJsonObject());
-
-	LineJSON->SetStringField("Line", LineToSay);
-
+	
 	const TSharedPtr<FJsonObject> ConditionsJSON(new FJsonObject());
 	for (FDialogueCondition Condition : Conditions)
 	{
@@ -131,7 +138,94 @@ TSharedPtr<FJsonObject> FDialogueLine::ToJsonObject()
 	return LineJSON;
 }
 
-bool FMultipleLineScoring::CheckAndAddLine(TSharedPtr<FDialogueLine> Line, FLineScore Score)
+bool UContextualDialogueLine::PopulateFromJsonObject(FString NewUniqueName, const TSharedPtr<FJsonObject> LineJsonObject)
+{
+	this->UniqueName = NewUniqueName;
+
+	const TSharedPtr<FJsonObject>* NewConditions;
+	const TSharedPtr<FJsonObject>* NewCallbacks;
+	const TSharedPtr<FJsonObject>* NewParameters;
+	const TSharedPtr<FJsonObject>* NewFilters;
+	const bool HasConditions = LineJsonObject->TryGetObjectField("Conditions", NewConditions);
+	const bool HasCallbacks = LineJsonObject->TryGetObjectField("Callbacks", NewCallbacks);
+	const bool HasParameters = LineJsonObject->TryGetObjectField("Parameters", NewParameters);
+	const bool HasFilters = LineJsonObject->TryGetObjectField("Filters", NewFilters);
+
+	if (HasCallbacks)
+	{
+		for (auto& Callback : NewCallbacks->Get()->Values)
+		{
+			FDialogueCallback NewCallback;
+			NewCallback.ObjectReference = Callback.Key;
+
+			// Get callback value as a string (raw string or convert the json object to string again).
+			FString RawCallback;
+			if(!Callback.Value->TryGetString(RawCallback))
+			{
+				// TODO: make this more reliable (using struct or something else maybe).
+				TSharedRef< TJsonWriter<> > Writer = TJsonWriterFactory<>::Create(&RawCallback);
+				TArray<TSharedPtr<FJsonValue>> Value = {Callback.Value};
+				FJsonSerializer::Serialize(Value, Writer);
+				RawCallback = RawCallback
+					.Replace(TEXT("\r"), TEXT(""))
+					.Replace(TEXT("\n"), TEXT(""))
+					.Replace(TEXT("\t"), TEXT(""));
+				RawCallback = RawCallback.RightChop(1).LeftChop(1); // Remove the brackets [] from the array previously created
+			}
+
+			switch (const CHAR& ControlSequence = RawCallback.Len() > 0 ? RawCallback[0] : '!')
+			{
+			// TODO: Could probably index the enum with strings and have an implicit constructor from the char...?
+			case '=':
+				NewCallback.CallbackType = ASSIGN;
+				break;
+			case '+':
+				NewCallback.CallbackType = ADD;
+				break;
+			case '-':
+				NewCallback.CallbackType = SUBTRACT;
+				break;
+			case '{':
+				NewCallback.CallbackType = EXECUTE;
+				break;
+			default:
+				UE_LOG(DialogueManagerUtils, Display,
+				       TEXT("[DIALOGUE] Unrecongnized callback control sequence: %hc"), ControlSequence)
+				return false;
+			}
+			NewCallback.Parameter = NewCallback.CallbackType == EXECUTE ? RawCallback : RawCallback.RightChop(1);
+			this->Callbacks.Add(NewCallback);
+		}
+	}
+
+	if (HasConditions)
+	{
+		if (!ParseConditionsIntoArray(NewConditions, this->Conditions))
+			return false;
+	}
+
+	// Filters are essentially conditions, they just serve a different purpose
+	if (HasFilters)
+	{
+		if (!ParseConditionsIntoArray(NewFilters, this->Filters))
+			return false;
+	}
+
+	if (HasParameters)
+	{
+		TMap<FString, FString> Params;
+		for (auto& Param : NewParameters->Get()->Values)
+		{
+			Params.Emplace(Param.Key, Param.Value.Get()->AsString());
+		}
+
+		this->Parameters = Params;
+	}
+
+	return true;
+}
+
+bool FMultipleLineScoring::CheckAndAddLine(UContextualDialogueLine* Line, FLineScore Score)
 {
 	// First element
 	if(CurrLines == 0)
@@ -195,7 +289,7 @@ bool FMultipleLineScoring::CheckAndAddLine(TSharedPtr<FDialogueLine> Line, FLine
 	return false;
 }
 
-void FMultipleLineScoring::GetNBestResults(const int NoOfElements, TArray<FDialogueLine>& OutLines)
+void FMultipleLineScoring::GetNBestResults(const int NoOfElements, TArray<UContextualDialogueLine*>& OutLines)
 {
 	if (Lines.Num() == 0)
 	{
@@ -210,14 +304,14 @@ void FMultipleLineScoring::GetNBestResults(const int NoOfElements, TArray<FDialo
 
 	// TArray<TPair<FString, FString>> LinesAsStrings;
 	// Algo::Transform(Lines, LinesAsStrings, [](TSharedPtr<FDialogueLine> Line){return Line->LineToSay; });
-	const TArrayView<TSharedPtr<FDialogueLine>> Tmp = MakeArrayView(Lines).Slice(FMath::Max(Lines.Num() - 1 - NoOfElements, 0),
+	const TArrayView<UContextualDialogueLine*> Tmp = MakeArrayView(Lines).Slice(FMath::Max(Lines.Num() - 1 - NoOfElements, 0),
 																					FMath::Min(NoOfElements, Lines.Num()));
 
-	for(TSharedPtr<FDialogueLine> Line : Tmp)
+	for(UContextualDialogueLine* Line : Tmp)
 	{
 		// Only add lines with score other than 0
 		if(Scores[Lines.Find(Line)].Score > 0.0f)
-			OutLines.Add(*Line);
+			OutLines.Add(Line);
 	}
 }
 

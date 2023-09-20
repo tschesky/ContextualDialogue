@@ -143,18 +143,17 @@ struct FQueryCategory
 /**
  *	Encapsulates a whole Dialogue line from the database
  */
-USTRUCT(BlueprintType)
-struct FDialogueLine
+UCLASS(BlueprintType)
+class UContextualDialogueLine : public UObject
 {
 	GENERATED_BODY()
 
+public:
+	UContextualDialogueLine();
+	
 	/** Unique line name, it's the key under which the line object is stored in JSON */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString UniqueName;
-
-	/** Actual dialogue line to be returned/displayed when this line passes the selection process */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FString LineToSay;
 
 	/** List of all the conditions this line should meet to be selected */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -183,10 +182,24 @@ struct FDialogueLine
 	bool GetParameterValue(FString ParameterName, FString& ParameterValue);
 
 	/** Get the string representation of this line */
-	FString ToString();
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	virtual FString ToPrettyString();
+	
+	/** Get the string representation of this line */
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	virtual FString ToJSONString();
 
 	/** Get this dialogue line as a json object */
 	TSharedPtr<FJsonObject> ToJsonObject();
+
+	/** Create this object from a json object */
+	bool PopulateFromJsonObject(FString NewUniqueName, const TSharedPtr<FJsonObject> LineJsonObject);
+};
+
+UCLASS(BlueprintType)
+class UTestLine : public UContextualDialogueLine
+{
+	GENERATED_BODY()
 };
 
 /**
@@ -203,16 +216,15 @@ inline bool operator==(const TMap<FString, FString>& lhs, const TMap<FString, FS
 }
 
 
-inline bool operator==(const FDialogueLine& lhs, const FDialogueLine& rhs)
+inline bool operator==(const UContextualDialogueLine& lhs, const UContextualDialogueLine& rhs)
 {
 	return  lhs.UniqueName == rhs.UniqueName &&
-		    lhs.LineToSay == rhs.LineToSay &&
 		   	lhs.Conditions == rhs.Conditions &&
 		   	lhs.Callbacks == rhs.Callbacks &&
 		   	lhs.Parameters == rhs.Parameters;
 }
 
-inline bool operator!=(const FDialogueLine& lhs, const FDialogueLine& rhs)
+inline bool operator!=(const UContextualDialogueLine& lhs, const UContextualDialogueLine& rhs)
 {
 	return  !operator==(lhs, rhs);
 }
@@ -342,7 +354,7 @@ struct FMultipleLineScoring
 
 	/** Currently kept lines and scores. The assumption is that Scores and Lines are kept in relative order */
 	TArray<FLineScore> Scores;
-	TArray<TSharedPtr<FDialogueLine>> Lines;
+	TArray<UContextualDialogueLine*> Lines;
 
 	/**
 	 *	Evaluate and add a line
@@ -352,7 +364,7 @@ struct FMultipleLineScoring
 	 *
 	 *	@return True if successfully added, False otherwise
 	 */
-	bool CheckAndAddLine(TSharedPtr<FDialogueLine> Line, FLineScore Score);
+	bool CheckAndAddLine(UContextualDialogueLine* Line, FLineScore Score);
 
 	/**
 	 *	Return N best lines from the current state.  The amount of lines returned can be actually different than requested N
@@ -361,5 +373,5 @@ struct FMultipleLineScoring
 	 *	@param[in]	NoOfElements	How many elements to return
 	 *	@param[out] OutLines		TArray to hold the returned N best lines
 	 */
-	void GetNBestResults(const int NoOfElements, TArray<FDialogueLine>& OutLines);
+	void GetNBestResults(const int NoOfElements, TArray<UContextualDialogueLine*>& OutLines);
 };

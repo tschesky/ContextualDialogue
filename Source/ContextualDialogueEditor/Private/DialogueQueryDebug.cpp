@@ -23,7 +23,7 @@ void UDialogueQueryDebug::NativeConstruct()
 	FEditorDelegates::PostPIEStarted.AddUFunction(this, FName("PIEStarted"));
 }
 
-void UDialogueQueryDebug::OnDialogueQueryFinished(TArray<FLineScore> Scores, TArray<FDialogueLine> Lines)
+void UDialogueQueryDebug::OnDialogueQueryFinished(TArray<FLineScore> Scores, TArray<UContextualDialogueLine*> Lines)
 {
 	UE_LOG(DialogueQueryDebug, Warning, TEXT("WIDGET RECEIVED QUERY UPDATE. Num lines : %i ; Num scores: %i"), Lines.Num(), Scores.Num());
 

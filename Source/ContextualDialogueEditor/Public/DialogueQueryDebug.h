@@ -31,7 +31,7 @@ public:
 	 *  @param Lines	The array of all lines that have been returned from the query
 	 */
 	UFUNCTION()
-	void OnDialogueQueryFinished( TArray<FLineScore> Scores, TArray<FDialogueLine> Lines);
+	void OnDialogueQueryFinished( TArray<FLineScore> Scores, TArray<UContextualDialogueLine*> Lines);
 
 	/**
 	 *  A function to be subscribed to the PIEStarted event dispatcher of the editor. We need to get a reference to the Dialogue
@@ -51,7 +51,7 @@ public:
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue Debug Data")
-	TArray<FDialogueLine> m_CurrentLines;
+	TArray<UContextualDialogueLine*> m_CurrentLines;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue Debug Data")
 	TArray<FLineScore> m_CurrentScores;

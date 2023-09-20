@@ -2,6 +2,7 @@
 
 #pragma once
 #include "CoreMinimal.h"
+#include "DialogueManagerUtils.h"
 #include "Engine/DeveloperSettings.h"
 #include "ContextualDialogueSettings.generated.h"
 
@@ -14,6 +15,9 @@ class CONTEXTUALDIALOGUE_API UContextualDialogueSettings : public UDeveloperSett
 	GENERATED_BODY()
 
 public:
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, config, Category = "DialogueSubsystem", meta = (DisplayName = "Dialogue line class"))
+	TSubclassOf<UContextualDialogueLine> DialogueLineClass;
+	
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, config, Category = "DialogueSubsystem", meta = (DisplayName = "Start the dialogue system?"))
 	bool StartDialogueSubsystem = false;
 	

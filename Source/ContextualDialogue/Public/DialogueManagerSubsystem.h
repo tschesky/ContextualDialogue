@@ -10,9 +10,9 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(DialogueManagerSubsystem, Log, All);
 
-typedef TArray<TSharedPtr<FDialogueLine>> FDialogueDB;
-typedef TMap<FString, TSharedPtr<FDialogueLine>> FDialogueLookupTable;
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueQueryFinished, TArray<FLineScore>, Scores, TArray<FDialogueLine>, Lines);
+typedef TArray<UContextualDialogueLine*> FDialogueDB;
+typedef TMap<FString, UContextualDialogueLine*> FDialogueLookupTable;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueQueryFinished, TArray<FLineScore>, Scores, TArray<UContextualDialogueLine*>, Lines);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWorldStateUpdated, const TArray<FObjectValueMapping>&, WorldState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDialogueAndWorldStateLoaded);
 
@@ -60,9 +60,28 @@ public:
 		TMap<FString, FString> RequiredParameters,
 		TMap<FString, FString> ExcludedParameters,
 		bool ProcessCallbacks,
-		TArray<FDialogueLine>& OutLines,
+		TArray<UContextualDialogueLine*>& OutLines,
 		bool& RequestedNumOfLinesFound,
 		int& ActualNumOfLinesFound);
+
+	/**
+	 *  Get a single best line for current world context
+	 *
+	 *  @param[in]	QueryCategories				Categories to pass to the query (lines without matching categories won't even be considered)
+	 *  @param[in] RequiredParameters			Parameters (key-value) the lines must have. If you need that the lines contain only a parameter key (any value), set the parameter value to '*'.
+	 *  @param[in] ExcludedParameters			Parameters (key-value) the lines must NOT have. If you need that the lines should not have a specific parameter key (any value), set the parameter value to '*'.
+	 *  @param[in]	ProcessCallbacks			Should callbacks of selected lines be processed immediately upon selection?
+	 *  @param[out]	FoundLine					Was the line found?
+	 *  @param[out]	Line						LineObject
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm="QueryCategories, RequiredParameters, ExcludedParameters"))
+	void GetBestLine(
+		TArray<FQueryCategory> QueryCategories,
+		TMap<FString, FString> RequiredParameters,
+		TMap<FString, FString> ExcludedParameters,
+		bool ProcessCallbacks,
+		bool& FoundLine,
+		UContextualDialogueLine*& Line);
 
 	/**
 	 *  Get multiple lines of dialogue given current world state and having the parameters given.
@@ -73,9 +92,9 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm="Categories"))
 	bool GetLinesWithParametersForCurrentContext(
-	TArray<FQueryCategory> QueryCategories,
-	TMap<FString, FString> Parameters,
-	TArray<FDialogueLine>& OutLines);
+		TArray<FQueryCategory> QueryCategories,
+		TMap<FString, FString> Parameters,
+		TArray<UContextualDialogueLine*>& OutLines);
 	
 	/**
 	 *	This is a bit of a hack-y function to get around our "prompts" that we display. In normal circumstances, this
@@ -88,7 +107,7 @@ public:
 	 *	@param Line	Line that was selected for display.
 	 */
 	UFUNCTION(BlueprintCallable)
-	void DialogueLineSelected(FDialogueLine Line);
+	void DialogueLineSelected(UContextualDialogueLine* Line);
 	
 	/**
 	 *	Checks if a line should be deleted from the database after use. If it should - then it's removed.
@@ -97,7 +116,7 @@ public:
 	 *	@return True if line has been deleted, false otherwise
 	 */
 	UFUNCTION(BlueprintCallable)
-	bool DeleteLineFromDataBase(FDialogueLine Line);
+	bool DeleteLineFromDataBase(UContextualDialogueLine* Line);
 	
 	/**
 	 *	Execute callbacks of a selected dialogue line
@@ -105,7 +124,7 @@ public:
 	 *	@param Line	Line whose callbacks should be processed/executed
 	 */
 	UFUNCTION(BlueprintCallable)
-	void ProcessSingleLineCallbacks(FDialogueLine Line);
+	void ProcessSingleLineCallbacks(UContextualDialogueLine* Line);
 
 	/**
 	 *	Utility function to set the value of "World.Speaker" variable. Simply calls SetVariable().
@@ -158,7 +177,7 @@ public:
 	 *	@return value of the parameter as string
 	 */
 	UFUNCTION(BlueprintCallable)
-	FString GetDialogueLineParameterByName(FDialogueLine DialogueLine, FString ParameterName);
+	FString GetDialogueLineParameterByName(UContextualDialogueLine* DialogueLine, FString ParameterName);
 
 	/**
 	 *	Get a score for a single line, given a current World State
@@ -166,7 +185,7 @@ public:
 	 *	@param	Line	Line to score
 	 *	@return Score achieved by the line, expressed as a FLineScore structure
 	 */
-	FLineScore GetLineScore(TSharedPtr<FDialogueLine> Line) const;
+	FLineScore GetLineScore(UContextualDialogueLine* Line) const;
 
 
 	bool IsConditionFulfilled(FDialogueCondition& Condition) const;
@@ -290,7 +309,7 @@ protected:
 	FDialogueLookupTable DialogueLookup;
 
 	/** Maps dialogue lines to categories, for quick category lookup */
-	TMap<FString, TMap<FString, TArray<TSharedPtr<FDialogueLine>>>> Categories;
+	TMap<FString, TMap<FString, TArray<UContextualDialogueLine*>>> Categories;
 
 	/** Contains the objects currently reflected in the Dialogue System's world state */
 	TMap<FString, FObjectValueMapping> WorldState;
@@ -348,7 +367,7 @@ protected:
 	 *
 	 *	@param Line	Line whose callbacks should be processed/executed
 	 */
-	void ProcessLineCallbacks(TSharedPtr<FDialogueLine> Line);
+	void ProcessLineCallbacks(UContextualDialogueLine* Line);
 
 	/** After loading in the level - check if load was requested and load game if necessary */
 	UFUNCTION(BlueprintCallable)

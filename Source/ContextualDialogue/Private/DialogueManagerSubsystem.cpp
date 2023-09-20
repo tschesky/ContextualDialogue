@@ -9,7 +9,6 @@
 #include "Chaos/ChaosPerfTest.h"
 #include "HAL/FileManagerGeneric.h"
 #include "Misc/DefaultValueHelper.h"
-#include "Misc/Crc.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -98,94 +97,21 @@ bool UDialogueManagerSubsystem::LoadDialogueDatabaseFromJsonFile(FString FullFil
 		return false;
 	}
 
+	
+	
 	// Convert the json to dialogue lines and add them to the DialogueDatabase.
 	for (const auto& Element : JsonParsed->Values)
 	{
-		FString UniqueLineName = Element.Key;
-		auto& LineJsonObject = Element.Value->AsObject();
-		TSharedPtr<FDialogueLine> LineAsset(new FDialogueLine());
-		LineAsset->UniqueName = UniqueLineName;
-		LineAsset->LineToSay = LineJsonObject->GetStringField("Line");
+		const FString UniqueLineName = Element.Key;
+		const TSharedPtr<FJsonObject, ESPMode::ThreadSafe>& LineJsonObject = Element.Value->AsObject();
 
-		const TSharedPtr<FJsonObject>* Conditions;
-		const TSharedPtr<FJsonObject>* Callbacks;
-		const TSharedPtr<FJsonObject>* Parameters;
-		const TSharedPtr<FJsonObject>* Filters;
-		bool HasConditions = LineJsonObject->TryGetObjectField("Conditions", Conditions);
-		bool HasCallbacks = LineJsonObject->TryGetObjectField("Callbacks", Callbacks);
-		bool HasParameters = LineJsonObject->TryGetObjectField("Parameters", Parameters);
-		bool HasFilters = LineJsonObject->TryGetObjectField("Filters", Filters);
+		const UContextualDialogueSettings* DevSettings = GetDefault<UContextualDialogueSettings>();
+		
+		UContextualDialogueLine* LineAsset(NewObject<UContextualDialogueLine>(this, DevSettings->DialogueLineClass));
 
-		if (HasCallbacks)
+		if(!LineAsset->PopulateFromJsonObject(UniqueLineName, LineJsonObject))
 		{
-			for (auto& Callback : Callbacks->Get()->Values)
-			{
-				FDialogueCallback NewCallback;
-				NewCallback.ObjectReference = Callback.Key;
-
-				// Get callback value as a string (raw string or convert the json object to string again).
-				FString RawCallback;
-				if(!Callback.Value->TryGetString(RawCallback))
-				{
-					// TODO: make this more reliable (using struct or something else maybe).
-					TSharedRef< TJsonWriter<> > Writer = TJsonWriterFactory<>::Create(&RawCallback);
-					TArray<TSharedPtr<FJsonValue>> Value = {Callback.Value};
-					FJsonSerializer::Serialize(Value, Writer);
-					RawCallback = RawCallback
-						.Replace(TEXT("\r"), TEXT(""))
-						.Replace(TEXT("\n"), TEXT(""))
-						.Replace(TEXT("\t"), TEXT(""));
-					RawCallback = RawCallback.RightChop(1).LeftChop(1); // Remove the brackets [] from the array previously created
-				}
-				
-				const CHAR& ControlSequence = RawCallback.Len() > 0 ? RawCallback[0] : '!';
-				switch (ControlSequence)
-				{
-				// TODO: Could probably index the enum with strings and have an implicit constructor from the char...?
-				case '=':
-					NewCallback.CallbackType = ASSIGN;
-					break;
-				case '+':
-					NewCallback.CallbackType = ADD;
-					break;
-				case '-':
-					NewCallback.CallbackType = SUBTRACT;
-					break;
-				case '{':
-					NewCallback.CallbackType = EXECUTE;
-					break;
-				default:
-					UE_LOG(DialogueManagerSubsystem, Display,
-					       TEXT("[DIALOGUE] Unrecongnized callback control sequence: %hc"), ControlSequence)
-					return false;
-				}
-				NewCallback.Parameter = NewCallback.CallbackType == EXECUTE ? RawCallback : RawCallback.RightChop(1);
-				LineAsset->Callbacks.Add(NewCallback);
-			}
-		}
-
-		if (HasConditions)
-		{
-			if (!ParseConditionsIntoArray(Conditions, LineAsset->Conditions))
-				return false;
-		}
-
-		// Filters are essentially conditions, they just serve a different purpose
-		if (HasFilters)
-		{
-			if (!ParseConditionsIntoArray(Filters, LineAsset->Filters))
-				return false;
-		}
-
-		if (HasParameters)
-		{
-			TMap<FString, FString> Params;
-			for (auto& Param : Parameters->Get()->Values)
-			{
-				Params.Emplace(Param.Key, Param.Value.Get()->AsString());
-			}
-
-			LineAsset->Parameters = Params;
+			return false;
 		}
 
 		// Remember the index at which we are adding and store it in the map for faster lookup later
@@ -194,10 +120,9 @@ bool UDialogueManagerSubsystem::LoadDialogueDatabaseFromJsonFile(FString FullFil
 
 		// Do it after the line has been added so that we can store a pointer to it
 		const TSharedPtr<FJsonObject>* ParsedCategories;
-		bool HasCategories = LineJsonObject->TryGetObjectField("Categories", ParsedCategories);
-		if (HasCategories)
+		if (bool HasCategories = LineJsonObject->TryGetObjectField("Categories", ParsedCategories))
 		{
-			for (auto& Filter : ParsedCategories->Get()->Values)
+			for (const auto& Filter : ParsedCategories->Get()->Values)
 			{
 				FString Category = Filter.Key;
 				FString Value = Filter.Value->AsString();
@@ -222,7 +147,7 @@ TSharedPtr<FJsonObject> UDialogueManagerSubsystem::DialogueDBToJsonObject()
 {
 	const TSharedPtr<FJsonObject> DialogueDbJSON(new FJsonObject());
 
-	for(const TSharedPtr<FDialogueLine> Line : DialogueDataBase)
+	for(UContextualDialogueLine* Line : DialogueDataBase)
 	{
 		if(Line->UniqueName.IsEmpty())
 			continue;
@@ -431,8 +356,8 @@ void UDialogueManagerSubsystem::Initialize(FSubsystemCollectionBase& collection)
 	Super::Initialize(collection);
 
 	// Check if there is any saved progress
-	const float SaveNo = GetNextSaveSlot(FPaths::Combine(FPaths::ProjectSavedDir(), SAVE_DIR), LastSaveSlotFullPath);
-	IsSaveSlotAvailable = SaveNo != 0;
+	// const float SaveNo = GetNextSaveSlot(FPaths::Combine(FPaths::ProjectSavedDir(), SAVE_DIR), LastSaveSlotFullPath);
+	// IsSaveSlotAvailable = SaveNo != 0;
 
 	/*if(UChurchInTheWildGameInstance* ChurchGI = Cast<UChurchInTheWildGameInstance>(UGameplayStatics::GetGameInstance(GetWorld())))
 	{
@@ -471,7 +396,7 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 	TMap<FString, FString> RequiredParameters,
 	TMap<FString, FString> ExcludedParameters,
 	bool ProcessCallbacks,
-	TArray<FDialogueLine>& OutLines,
+	TArray<UContextualDialogueLine*>& OutLines,
 	bool& RequestedNumOfLinesFound,
 	int& ActualNumOfLinesFound)
 {
@@ -482,7 +407,7 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 
 	// First filter out the database to only contain lines whose Filter conditions are met
 	FDialogueDB FilteredDB = DialogueDataBase.FilterByPredicate(
-		[&](const TSharedPtr<FDialogueLine> Line)
+		[&](UContextualDialogueLine* Line)
 		{
 			for (FDialogueCondition& Condition : Line->Filters)
 			{
@@ -495,7 +420,7 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 			return true;
 		});
 
-	TArray<TSharedPtr<FDialogueLine>> LineCandidates;
+	TArray<UContextualDialogueLine*> LineCandidates;
 
 	// Keep the lines that has all the Required Parameters and none of the exclude parameters
 	for (auto Line : FilteredDB)
@@ -537,7 +462,7 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 	}
 
 #if WITH_EDITOR
-	TArray<FDialogueLine> DebugLines;
+	TArray<UContextualDialogueLine*> DebugLines;
 	TArray<FLineScore> DebugScores;
 #endif
 
@@ -556,7 +481,7 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 				ScoringStruct.CheckAndAddLine(Line, LineScore);
 
 #if WITH_EDITOR
-				DebugLines.Add(*Line);
+				DebugLines.Add(Line);
 				DebugScores.Add(LineScore);
 #endif
 			}
@@ -565,14 +490,14 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 
 	else
 	{
-		for (TSharedPtr<FDialogueLine> Line : FilteredDB)
+		for (UContextualDialogueLine* Line : FilteredDB)
 		{
 			if (!LineCandidates.Contains(Line)) continue; // TODO: optimize this
 			FLineScore LineScore = GetLineScore(Line);
 			ScoringStruct.CheckAndAddLine(Line, LineScore);
 
 #if WITH_EDITOR
-			DebugLines.Add(*Line);
+			DebugLines.Add(Line);
 			DebugScores.Add(LineScore);
 #endif
 		}
@@ -582,15 +507,15 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 	OnDialogueQueryFinished.Broadcast(DebugScores, DebugLines);
 #endif
 
-	TArray<FDialogueLine> OutArray;
+	TArray<UContextualDialogueLine*> OutArray;
 	ScoringStruct.GetNBestResults(NoLines, OutArray);
 
 	if (ProcessCallbacks)
 	{
-		for (FDialogueLine SelectedLineOjb : OutArray)
+		for (UContextualDialogueLine* SelectedLineOjb : OutArray)
 		{
 			UE_LOG(DialogueManagerSubsystem, Warning, TEXT("PROCESSING LINE MAPPINGS"))
-			ProcessLineCallbacks(MakeShared<FDialogueLine>(SelectedLineOjb));
+			ProcessLineCallbacks(SelectedLineOjb);
 		}
 	}
 
@@ -599,13 +524,27 @@ void UDialogueManagerSubsystem::GetLinesForCurrentContext(
 	ActualNumOfLinesFound = OutArray.Num();
 }
 
+void UDialogueManagerSubsystem::GetBestLine(TArray<FQueryCategory> QueryCategories,
+                                            TMap<FString, FString> RequiredParameters,
+                                            TMap<FString, FString> ExcludedParameters, bool ProcessCallbacks,
+                                            bool& FoundLine, UContextualDialogueLine*& Line)
+{
+	TArray<UContextualDialogueLine*> OutLines;
+	int ActualNumOfLinesFound;
+	
+	GetLinesForCurrentContext(1, QueryCategories, RequiredParameters, ExcludedParameters, ProcessCallbacks, OutLines,
+	                          FoundLine, ActualNumOfLinesFound);
+
+	Line = FoundLine ? OutLines[0] : nullptr;
+}
+
 bool UDialogueManagerSubsystem::GetLinesWithParametersForCurrentContext(
 	TArray<FQueryCategory> QueryCategories,
 	TMap<FString, FString> Parameters,
-	TArray<FDialogueLine>& OutLines)
+	TArray<UContextualDialogueLine*>& OutLines)
 {
 	// Get the lines of current context
-	TArray<FDialogueLine> LinesInContext;
+	TArray<UContextualDialogueLine*> LinesInContext;
 	bool AllLinesFound;
 	int NLinesFound;
 	TMap<FString, FString> p;
@@ -621,15 +560,15 @@ bool UDialogueManagerSubsystem::GetLinesWithParametersForCurrentContext(
 		NLinesFound);
 
 	// Get only the one with the desired parameters.
-	TArray<FDialogueLine> LineCandidates;
+	TArray<UContextualDialogueLine*> LineCandidates;
 	for (auto Line : LinesInContext)
 	{
 		bool IsCandidate = true;
 		for (auto Parameter : Parameters)
 		{
-			if (Line.Parameters.Contains(Parameter.Key))
+			if (Line->Parameters.Contains(Parameter.Key))
 			{
-				if (Line.Parameters[Parameter.Key] != Parameter.Value)
+				if (Line->Parameters[Parameter.Key] != Parameter.Value)
 				{
 					IsCandidate = false;
 				}
@@ -654,7 +593,7 @@ bool UDialogueManagerSubsystem::GetLinesWithParametersForCurrentContext(
 	return false;
 }
 
-void UDialogueManagerSubsystem::DialogueLineSelected(FDialogueLine Line)
+void UDialogueManagerSubsystem::DialogueLineSelected(UContextualDialogueLine* Line)
 {
 	// Process callbacks of a given line
 	ProcessSingleLineCallbacks(Line);
@@ -663,35 +602,35 @@ void UDialogueManagerSubsystem::DialogueLineSelected(FDialogueLine Line)
 	DeleteLineFromDataBase(Line);
 }
 
-bool UDialogueManagerSubsystem::DeleteLineFromDataBase(FDialogueLine Line)
+bool UDialogueManagerSubsystem::DeleteLineFromDataBase(UContextualDialogueLine* Line)
 {
 	FString IsPersistent;
-	if (Line.GetParameterValue("Persistent", IsPersistent) && IsPersistent.ToLower() == "true")
+	if (Line->GetParameterValue("Persistent", IsPersistent) && IsPersistent.ToLower() == "true")
 	{
 		// The persistent parameter exists and is equal to true - we do not want to delete the line
 		return false;
 	}
 
-	auto Ptr = DialogueLookup.Find(Line.UniqueName);
-	const TSharedPtr<FDialogueLine> LinePtr = Ptr == nullptr ? nullptr : *Ptr;
+	auto Ptr = DialogueLookup.Find(Line->UniqueName);
+	UContextualDialogueLine* LinePtr = Ptr == nullptr ? nullptr : *Ptr;
 
-	if (!LinePtr.IsValid())
+	if (!LinePtr)
 		return false;
 
 	// Remove the line from database AND lookup
 	DialogueDataBase.Remove(LinePtr);
-	DialogueLookup.Remove(Line.UniqueName);
+	DialogueLookup.Remove(Line->UniqueName);
 
 	return true;
 }
 
-void UDialogueManagerSubsystem::ProcessSingleLineCallbacks(FDialogueLine Line)
+void UDialogueManagerSubsystem::ProcessSingleLineCallbacks(UContextualDialogueLine* Line)
 {
-	ProcessLineCallbacks(MakeShared<FDialogueLine>(Line));
+	ProcessLineCallbacks(Line);
 }
 
 // TODO: Probably template the whole shit with type of the variable ( ͡° ͜ʖ ͡°)
-FLineScore UDialogueManagerSubsystem::GetLineScore(TSharedPtr<FDialogueLine> Line) const
+FLineScore UDialogueManagerSubsystem::GetLineScore(UContextualDialogueLine* Line) const
 {
 	float TotalScore = 0;
 
@@ -874,9 +813,9 @@ void UDialogueManagerSubsystem::DebugPrintDialogueDataBase()
 {
 	UE_LOG(DialogueManagerSubsystem, Display, TEXT("[DIALOGUE] DIALOGUE DATABASE: "))
 	UE_LOG(DialogueManagerSubsystem, Display, TEXT("{"))
-	for (TSharedPtr<FDialogueLine> Line : DialogueDataBase)
+	for (UContextualDialogueLine* Line : DialogueDataBase)
 	{
-		UE_LOG(DialogueManagerSubsystem, Display, TEXT("\t %s"), *Line->ToString())
+		UE_LOG(DialogueManagerSubsystem, Display, TEXT("\t %s"), *Line->ToJSONString())
 	}
 	UE_LOG(DialogueManagerSubsystem, Display, TEXT("}"))
 }
@@ -905,11 +844,11 @@ TSharedPtr<FJsonObject> UDialogueManagerSubsystem::GetContextVariablesAsJSON()
 	return ReturnJSON;
 }
 
-FString UDialogueManagerSubsystem::GetDialogueLineParameterByName(FDialogueLine DialogueLine, FString ParameterName)
+FString UDialogueManagerSubsystem::GetDialogueLineParameterByName(UContextualDialogueLine* DialogueLine, FString ParameterName)
 {
-	if (DialogueLine.Parameters.Contains(ParameterName))
+	if (DialogueLine->Parameters.Contains(ParameterName))
 	{
-		return DialogueLine.Parameters[ParameterName];
+		return DialogueLine->Parameters[ParameterName];
 	}
 	return "";
 }
@@ -1023,7 +962,7 @@ bool UDialogueManagerSubsystem::IsStringANumber(const FString& StrToCheck)
 	return true;
 }
 
-void UDialogueManagerSubsystem::ProcessLineCallbacks(TSharedPtr<FDialogueLine> Line)
+void UDialogueManagerSubsystem::ProcessLineCallbacks(UContextualDialogueLine* Line)
 {
 	// Execute all the callbacks of the line
 	for (FDialogueCallback Callback : Line->Callbacks)
