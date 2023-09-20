@@ -39,7 +39,8 @@ public class ContextualDialogue : ModuleRules
 				"Slate",
 				"SlateCore",
 				"Json",
-				"DeveloperSettings"
+				"DeveloperSettings",
+				"UMG"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
